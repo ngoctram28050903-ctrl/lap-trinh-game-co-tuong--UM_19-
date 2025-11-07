@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles                   # Dùng để ph�
 
 
 # xử lý người chơi khi kết nối WebSocket và vào sảnh
-app.websocket("/ws")
+@app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     player_name: Optional[str] = None
