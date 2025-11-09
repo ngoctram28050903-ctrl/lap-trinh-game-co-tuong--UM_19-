@@ -48,3 +48,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 await safe_send(websocket, {"type": "system", "text": f"Chào mừng {player_name} đến sảnh."})
                 await send_lobby_update()
                 continue
+            # xử lý khi có người chơi gửi tin nhắn kiểu "challenge".
+            if msg_type == "challenge": #người chơi gửi yêu cầu thách đấu
+                    target_name = msg.get("target_player") # Lấy tên người chơi bị thách đấu từ dữ liệu tin nhắn
+                    if not player_name: continue
+            # Nếu tên người chơi đang gửi yêu cầu không tồn tại hoặc rỗng, thì bỏ qua vòng lặp này
+                    if target_name == player_name:
+            # Nếu người chơi đang gửi yêu cầu tự thách đấu mình
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "reason": "Bạn không thể tự thách đấu mình."
+                    }, ensure_ascii=False))
+            # Gửi lại thông báo lỗi qua websocket tự thách đấu bản thân
+                continue
+            # Bỏ qua phần xử lý tiếp theo, quay lại chờ tin nhắn mới
