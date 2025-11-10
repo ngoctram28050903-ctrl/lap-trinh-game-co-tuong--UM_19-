@@ -61,4 +61,46 @@ async def websocket_endpoint(websocket: WebSocket):
                     }, ensure_ascii=False))
             # Gửi lại thông báo lỗi qua websocket tự thách đấu bản thân
                 continue
-            # Bỏ qua phần xử lý tiếp theo, quay lại chờ tin nhắn mới
+            # Bỏ qua phần xử lý tiếp theo, quay lại chờ tin nhắn mớid
+            
+            # ----- CHALLENGE với bot -----
+if target_name == "Bot":                           # người chơi chọn thách đấu với "Bot"
+    async with lock:                               # tránh các clients khác sửa dữ liệu cùng lúc
+        if websocket in lobby: del lobby[websocket] # Xóa người chơi khỏi danh sách chờ (lobby)
+        room_id = str(uuid.uuid4())                # Tạo ID phòng ngẫu nhiên duy nhất
+        player_room_map[websocket] = room_id        # Ghi nhớ người chơi này đang ở phòng nào
+
+        human_player_name = player_name             # Lưu tên người chơi thật
+        bot_player_name = "Bot"                     # Đặt tên cho đối thủ là "Bot"
+
+        game_id = create_game_record(room_id, human_player_name, bot_player_name)
+        # Tạo bản ghi game mới trong database (hoặc log) để lưu lại thông tin trận đấu
+
+        rooms[room_id] = {                          # Khởi tạo thông tin phòng chơi
+            "players": {websocket: human_player_name},     # Liên kết socket người chơi với tên
+            "player_colors": {human_player_name: 'red', bot_player_name: 'black'}, # Người chơi thật cầm đỏ, bot cầm đen
+            "turn": "red",   # Lượt đầu tiên là của người chơi đỏ
+            "state": init_board(),      # Khởi tạo bàn cờ ban đầu
+            "game_id": game_id,    # Gắn ID trận vào
+            "move_count": 0,      # Đếm số lượt đi
+            "clocks": {"red": 300, "black": 300},    # Mỗi bên có 300 giây (5 phút)
+            "timer_task": None,       # Sẽ khởi tạo task đếm thời gian sau
+            "rematch_offered_by": None    # Chưa ai đề nghị chơi lại
+        }
+
+        rooms[room_id]["timer_task"] = asyncio.create_task(timer_loop(room_id))
+        # Bắt đầu chạy task đếm giờ song song cho phòng này
+
+        await websocket.send_text(json.dumps({
+            "type": "game_start",   # Gửi thông báo cho client biết trận đấu bắt đầu
+            "room_id": room_id,           # ID phòng
+            "color": "red",       # Màu quân của người chơi
+            "opponent": bot_player_name      # Đối thủ là Bot
+        }, ensure_ascii=False))
+
+        print(f"[MATCH START] room={room_id} {human_player_name}(red) vs {bot_player_name}(black)")
+        # In ra log server để theo dõi
+
+        await send_state(room_id)                   # Gửi trạng thái bàn cờ ban đầu đến client
+    await send_lobby_update()                       # Cập nhật lại danh sách lobby cho những người khác
+    continue                                        # Quay lại vòng lặp chờ sự kiện tiếp theo
