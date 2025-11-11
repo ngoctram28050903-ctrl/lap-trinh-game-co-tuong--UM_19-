@@ -1,4 +1,5 @@
-from __future__ import annotations  # dùng khi các class tham chiếu lẫn nhau như Game, Player
+from __future__ import annotatiogit config --global user.email "you@example.com"
+  git config --global user.name "Your Name"  # dùng khi các class tham chiếu lẫn nhau như Game, Player
 import asyncio                     # Dùng để xử lý các tác vụ bất đồng bộ
 import copy                        # Dùng để sao chép
 import json                        # gửi/nhận dữ liệu qua WebSocket giữa client và server
