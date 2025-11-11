@@ -139,3 +139,87 @@ if target_name == "Bot":                           # người chơi chọn thác
     # Báo cho người mời (websocket) biết là đã gửi xong.
     await websocket.send_text(json.dumps({"type":"system","text":f"Đã gửi lời mời đến {target_name}. Đang chờ đối thủ chấp nhận..."}))
     continue # Hoàn tất.
+# Nếu tin nhắn nhận được là "chấp nhận lời mời".
+if msg_type == "challenge_accept":
+    # Lấy tên của người đã gửi lời mời (opponent).
+    opponent_name = msg.get("opponent_name")
+    # 'player_name' là tên của người chấp nhận (chính là websocket hiện tại).
+    if not player_name: continue # Kiểm tra an toàn, nếu người chấp nhận không có tên thì bỏ qua.
+
+    # Sử dụng 'lock' để đảm bảo việc tạo phòng game diễn ra an toàn,
+    # tránh trường hợp 2 người chấp nhận cùng lúc hoặc lỗi dữ liệu.
+    async with lock:
+        # Tìm kết nối (websocket) của người đã mời.
+        challenger_ws = find_ws_by_name(opponent_name)
+        
+        # [Phần dự phòng]: Nếu tìm không thấy VÀ trong danh sách chờ
+        # đúng là 'opponent_name' đã mời 'player_name'.
+        if not challenger_ws and pending_challenges.get(player_name) == opponent_name:
+            # Thử tìm lại người đó trong sảnh (lobby).
+            challenger_ws = find_player_in_lobby(opponent_name)
+
+        # Nếu tìm đủ mọi cách mà vẫn không thấy người mời (có thể họ đã thoát):
+        if not challenger_ws:
+            # Báo lỗi về cho người chấp nhận (websocket).
+            await websocket.send_text(json.dumps({"type":"error","reason":f"'{opponent_name}' không còn ở sảnh hoặc phiên đã lỗi."}, ensure_ascii=False))
+            continue # Dừng xử lý.
+
+        # --- Nếu tìm thấy người mời, bắt đầu tạo trận đấu ---
+
+        # Dọn dẹp trạng thái "chờ mời" giữa 2 người này.
+        # Xóa lời mời mà 'opponent_name' gửi cho 'player_name'.
+        pending_challenges.pop(player_name, None)
+        pending_challenge_targets.pop(opponent_name, None)
+        # Xóa luôn nếu 'player_name' cũng đang mời 'opponent_name' (tránh xung đột).
+        pending_challenges.pop(opponent_name, None)
+        pending_challenge_targets.pop(player_name, None)
+
+        # Xóa cả hai người chơi khỏi sảnh (lobby) vì họ sắp vào game.
+        if websocket in lobby: del lobby[websocket]
+        if challenger_ws in lobby: del lobby[challenger_ws]
+
+        # Tạo một ID phòng game duy nhất.
+        room_id = str(uuid.uuid4())
+        
+        # Lưu lại: 2 kết nối (websocket) này giờ thuộc về phòng 'room_id'.
+        player_room_map[websocket] = room_id
+        player_room_map[challenger_ws] = room_id
+
+        # Gán tên cho rõ ràng.
+        challenger_name = lobby.get(challenger_ws, opponent_name) # Tên người mời
+        acceptor_name = player_name # Tên người chấp nhận
+        
+        # Tạo bản ghi game trong CSDL (Database) và lấy ID.
+        game_id = create_game_record(room_id, challenger_name, acceptor_name)
+
+        # Tạo đối tượng (dictionary) lưu trữ toàn bộ trạng thái của phòng game.
+        rooms[room_id] = {
+            "players": {websocket: acceptor_name, challenger_ws: challenger_name}, # Lưu ai điều khiển kết nối nào.
+            "player_colors": {challenger_name: 'red', acceptor_name: 'black'}, # Người mời (challenger) luôn là đỏ (đi trước).
+            "turn": "red", # Lượt đi đầu tiên là đỏ.
+            "state": init_board(), # Trạng thái bàn cờ ban đầu.
+            "game_id": game_id, # ID từ CSDL.
+            "move_count": 0, # Số nước đã đi.
+            "clocks": {"red": 300, "black": 300}, # Thời gian (ví dụ: 300 giây).
+            "timer_task": None, # Biến để giữ "task" đếm giờ.
+            "rematch_offered_by": None # Dùng cho việc mời tái đấu sau này.
+        }
+        
+        # Tạo và khởi chạy một 'task' (luồng) riêng để đếm giờ cho phòng này.
+        rooms[room_id]["timer_task"] = asyncio.create_task(timer_loop(room_id))
+
+        # Gửi tin nhắn "game_start" cho người chấp nhận (websocket): họ là màu 'black'.
+        await websocket.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "black", "opponent": challenger_name}, ensure_ascii=False))
+        # Gửi tin nhắn "game_start" cho người mời (challenger_ws): họ là màu 'red'.
+        await challenger_ws.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "red", "opponent": acceptor_name}, ensure_ascii=False))
+        
+        # In log trên server.
+        print(f"[MATCH START] room={room_id} {challenger_name}(red) vs {acceptor_name}(black)")
+        
+        # Gửi trạng thái bàn cờ ban đầu cho cả 2 người.
+        await send_state(room_id)
+        
+    # [Nằm ngoài 'lock'] Cập nhật lại danh sách sảnh cho tất cả người chơi khác
+    # (vì 2 người vừa vào game, không còn ở sảnh nữa).
+    await send_lobby_update()
+    continue # Kết thúc xử lý tin nhắn này.
