@@ -104,3 +104,38 @@ if target_name == "Bot":                           # người chơi chọn thác
         await send_state(room_id)                   # Gửi trạng thái bàn cờ ban đầu đến client
     await send_lobby_update()                       # Cập nhật lại danh sách lobby cho những người khác
     continue                                        # Quay lại vòng lặp chờ sự kiện tiếp theo
+# 'async with lock' đảm bảo chỉ một người xử lý việc mời tại một thời điểm.
+    
+    async with lock:
+    # Tìm kiếm kết nối (websocket) của người được mời.
+    target_ws = find_player_in_lobby(target_name)
+    
+    # Nếu không tìm thấy người được mời:
+    if not target_ws:
+        # Báo lỗi cho người mời và dừng xử lý.
+        await websocket.send_text(json.dumps({"type":"error","reason":f"Không tìm thấy người chơi '{target_name}' trong sảnh."}, ensure_ascii=False))
+        continue
+
+    # Ghi lại trạng thái đang chờ: Ai mời ai?
+    pending_challenges[target_name] = player_name
+    pending_challenge_targets[player_name] = target_name
+    
+    try:
+        # Gửi thông báo mời đến cho người được mời (target_ws).
+        await target_ws.send_text(json.dumps({"type":"challenge_received", "from_player": player_name}, ensure_ascii=False))
+    except Exception as e:
+        # Nếu gửi bị lỗi (ví dụ: người được mời bị ngắt kết nối):
+        print(f"[CHALLENGE] Failed to send to {target_name}: {e}")
+        # Báo lỗi cho người mời.
+        await websocket.send_text(json.dumps({"type":"error","reason":"Không thể gửi lời mời, đối thủ không phản hồi."}, ensure_ascii=False))
+        
+        # Hủy trạng thái chờ vì gửi lỗi.
+        pending_challenges.pop(target_name, None)
+        pending_challenge_targets.pop(player_name, None)
+        continue # Dừng lại.
+
+    # Nếu gửi mời thành công:
+    print(f"[CHALLENGE] {player_name} -> {target_name}")
+    # Báo cho người mời (websocket) biết là đã gửi xong.
+    await websocket.send_text(json.dumps({"type":"system","text":f"Đã gửi lời mời đến {target_name}. Đang chờ đối thủ chấp nhận..."}))
+    continue # Hoàn tất.
