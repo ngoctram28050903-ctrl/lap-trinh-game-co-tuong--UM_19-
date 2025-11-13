@@ -139,7 +139,9 @@ if target_name == "Bot":                           # người chơi chọn thác
     # Báo cho người mời (websocket) biết là đã gửi xong.
     await websocket.send_text(json.dumps({"type":"system","text":f"Đã gửi lời mời đến {target_name}. Đang chờ đối thủ chấp nhận..."}))
     continue # Hoàn tất.
+
 # Nếu tin nhắn nhận được là "chấp nhận lời mời".
+
 if msg_type == "challenge_accept":
     # Lấy tên của người đã gửi lời mời (opponent).
     opponent_name = msg.get("opponent_name")
@@ -223,3 +225,33 @@ if msg_type == "challenge_accept":
     # (vì 2 người vừa vào game, không còn ở sảnh nữa).
     await send_lobby_update()
     continue # Kết thúc xử lý tin nhắn này.
+
+    # ---------- CHALLENGE DECLINE ----------
+# Xử lý khi người chơi từ chối lời mời thách đấu
+if msg_type == "challenge_decline":
+
+    # Lấy tên đối thủ (người đã gửi lời mời)
+    opponent_name = msg.get("opponent_name")
+
+    # Dùng khóa async để tránh xung đột dữ liệu khi nhiều người cùng thao tác
+    async with lock:
+        # Tìm kết nối WebSocket của người đã gửi lời mời (đối thủ)
+        challenger_ws = find_ws_by_name(opponent_name)
+
+        if challenger_ws:
+            try:
+                # Gửi thông báo hệ thống đến đối thủ: "người chơi hiện tại đã từ chối lời mời"
+                await challenger_ws.send_text(json.dumps({
+                    "type": "system",
+                    "text": f"{player_name} đã từ chối lời mời."
+                }, ensure_ascii=False))
+            except:
+                # Nếu có lỗi (ví dụ đối thủ đã thoát), thì bỏ qua
+                pass
+
+        # Xóa thông tin lời mời khỏi danh sách chờ
+        pending_challenges.pop(player_name, None)          # Người chơi hiện tại không còn bị mời
+        pending_challenge_targets.pop(opponent_name, None) # Đối thủ không còn chờ phản hồi
+
+    # Kết thúc xử lý sự kiện này, tiếp tục lắng nghe các tin nhắn khác
+    continue
