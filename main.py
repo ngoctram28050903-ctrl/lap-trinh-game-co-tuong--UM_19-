@@ -255,3 +255,33 @@ if msg_type == "challenge_decline":
 
     # Kết thúc xử lý sự kiện này, tiếp tục lắng nghe các tin nhắn khác
     continue
+# ---------- CHAT ----------
+# Xử lý khi người chơi gửi tin nhắn chat
+if msg_type == "chat_message":
+
+    # Lấy nội dung tin nhắn người chơi gửi
+    text = msg.get("text")
+
+    # Nếu không có nội dung tin nhắn hoặc chưa xác định tên người chơi thì bỏ qua
+    if not text or not player_name:
+        continue
+
+    # Tìm phòng mà người chơi này đang tham gia
+    room_id = player_room_map.get(websocket)
+
+    # Nếu người chơi không ở trong phòng nào hoặc phòng không tồn tại -> bỏ qua
+    if not room_id or room_id not in rooms:
+        continue
+
+    # Tạo đối tượng tin nhắn chat (dạng JSON) để gửi cho các người chơi khác
+    chat_msg = {
+        "type": "new_chat_message",  # Kiểu thông điệp để client biết đây là tin nhắn mới
+        "from": player_name,         # Người gửi tin nhắn
+        "text": text                 # Nội dung tin nhắn
+    }
+
+    # Gửi tin nhắn đến tất cả người chơi trong cùng phòng (broadcast)
+    await broadcast_to_room(room_id, chat_msg)
+
+    # Sau khi xử lý xong, tiếp tục chờ tin nhắn khác
+    continue
