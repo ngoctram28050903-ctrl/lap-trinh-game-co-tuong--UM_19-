@@ -439,3 +439,7 @@ if msg_type == "leave_game":
     # Tiếp tục vòng lặp (lắng nghe tin nhắn tiếp theo)
     continue
 # ----------------- XỬ LÝ NGẮT KẾT NỐI -----------------
+except WebSocketDisconnect:
+    # Khi người chơi bị ngắt kết nối (đóng tab, mất mạng, thoát game,...)
+    print(f"[WS] Disconnect: {player_name}")   # In thông báo ra console để theo dõi
+    await cleanup_player(websocket)            # Gọi hàm dọn dẹp dữ liệu người chơi (xóa khỏi phòng, cập nhật sảnh,...)
