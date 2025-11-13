@@ -400,3 +400,42 @@ if msg_type == "move":
 
     # Kết thúc xử lý nước đi, tiếp tục lắng nghe các tin nhắn khác
     continue
+# ---------- LEAVE_GAME ----------
+# Xử lý khi người chơi rời khỏi ván game (ấn nút "Thoát game" hoặc rời phòng)
+if msg_type == "leave_game":
+
+    # Lấy ID của phòng hiện tại mà người chơi đang tham gia
+    room_id = player_room_map.get(websocket)
+
+    # Nếu người chơi KHÔNG ở trong phòng nào hoặc phòng đã bị xóa:
+    if not room_id or room_id not in rooms:
+        async with lock:
+            # Kiểm tra nếu người chơi chưa có trong sảnh (lobby)
+            if websocket not in lobby and player_name:
+                # Thêm người chơi trở lại vào sảnh chờ (lobby)
+                lobby[websocket] = player_name
+                # Gửi cập nhật danh sách sảnh cho tất cả người chơi
+                await send_lobby_update()
+        continue  # Bỏ qua các bước sau, quay lại vòng lặp chờ tin nhắn tiếp theo
+
+    # Nếu người chơi đang ở trong phòng game:
+    # -> Gọi hàm dọn dẹp (rời phòng, cập nhật trạng thái, giải phóng tài nguyên, v.v.)
+    await cleanup_player(websocket)
+
+    async with lock:
+        # Sau khi rời game, thêm người chơi quay lại sảnh
+        if player_name:
+            lobby[websocket] = player_name
+
+    # Gửi tin nhắn xác nhận cho người chơi: đã quay về sảnh
+    await websocket.send_text(json.dumps({
+        "type": "system",
+        "text": "Đã quay về sảnh."
+    }, ensure_ascii=False))
+
+    # Gửi cập nhật danh sách người chơi trong sảnh (để hiển thị cho tất cả client)
+    await send_lobby_update()
+
+    # Tiếp tục vòng lặp (lắng nghe tin nhắn tiếp theo)
+    continue
+# ----------------- XỬ LÝ NGẮT KẾT NỐI -----------------
