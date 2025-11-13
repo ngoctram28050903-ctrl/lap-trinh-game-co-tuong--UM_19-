@@ -443,3 +443,9 @@ except WebSocketDisconnect:
     # Khi người chơi bị ngắt kết nối (đóng tab, mất mạng, thoát game,...)
     print(f"[WS] Disconnect: {player_name}")   # In thông báo ra console để theo dõi
     await cleanup_player(websocket)            # Gọi hàm dọn dẹp dữ liệu người chơi (xóa khỏi phòng, cập nhật sảnh,...)
+# ----------------- XỬ LÝ LỖI BẤT NGỜ -----------------
+except Exception as e:
+    # Nếu có lỗi khác xảy ra trong quá trình xử lý (ví dụ lỗi logic, dữ liệu sai,...)
+    print(f"[WS] Exception for {player_name}: {e}")  # In thông báo lỗi kèm tên người chơi
+    traceback.print_exc()                            # In chi tiết lỗi (stack trace) để tiện debug
+    await cleanup_player(websocket)                  # Dọn dẹp người chơi để tránh lỗi "người chơi ma" hoặc dữ liệu thừa
