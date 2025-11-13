@@ -285,3 +285,118 @@ if msg_type == "chat_message":
 
     # Sau khi xử lý xong, tiếp tục chờ tin nhắn khác
     continue
+# ---------- MOVE ----------
+# Xử lý khi người chơi thực hiện một nước đi
+if msg_type == "move":
+
+    # Lấy thông tin nước đi từ dữ liệu client gửi lên (VD: from -> to)
+    move = msg.get("move")
+
+    # Xác định phòng mà người chơi này đang ở
+    room_id = player_room_map.get(websocket)
+
+    # Nếu người chơi không ở trong phòng hoặc phòng không tồn tại -> báo lỗi
+    if not room_id or room_id not in rooms:
+        await websocket.send_text(json.dumps({"type":"error","reason":"Bạn không ở trong phòng."}, ensure_ascii=False))
+        continue
+
+    # Các cờ cảnh báo đặc biệt trong cờ tướng
+    is_check_alert = False            # Chiếu tướng đối thủ
+    is_self_check_alert = False       # Tự chiếu (nước đi sai)
+    is_flying_general_alert = False   # Hai tướng đối mặt trực tiếp (lộ tướng)
+    bot_color_to_move = None          # Dành cho chế độ chơi với Bot
+
+    # Khóa để tránh xung đột khi nhiều người cùng gửi dữ liệu
+    async with lock:
+        # Lấy thông tin game trong phòng hiện tại
+        game = rooms[room_id]
+
+        # Lấy tên người chơi từ websocket
+        player = game["players"].get(websocket)
+        if not player:
+            continue  # Nếu không tìm thấy, bỏ qua
+
+        # Xác định màu của người chơi (đỏ / đen)
+        player_color = game["player_colors"].get(player, "spectator")
+
+        # Kiểm tra xem có phải lượt của người chơi không
+        if player_color != game["turn"]:
+            await websocket.send_text(json.dumps({"type":"error","reason":"Không phải lượt của bạn"}, ensure_ascii=False))
+            continue
+
+        # Nếu game đã kết thúc rồi (game_id không tồn tại) -> báo lỗi
+        if game.get("game_id") is None:
+            await websocket.send_text(json.dumps({"type":"error","reason":"Game đã kết thúc"}, ensure_ascii=False))
+            continue
+
+        # Kiểm tra nước đi hợp lệ hay không
+        valid, reason = is_valid_move(game["state"]["board"], move, player_color)
+        if not valid:
+            # Nếu sai quy tắc, gửi lỗi lý do
+            await websocket.send_text(json.dumps({"type":"error","reason":reason}, ensure_ascii=False))
+            continue
+
+        # Lưu tọa độ quân cờ di chuyển (from_x, from_y)
+        fx, fy = move["from"]["x"], move["from"]["y"]
+        piece = game["state"]["board"][fy][fx]  # Quân cờ được di chuyển
+
+        # Thực hiện cập nhật bàn cờ với nước đi đó
+        apply_move(game["state"], move)
+
+        # Kiểm tra các tình huống đặc biệt sau khi di chuyển:
+        if is_flying_general(game["state"]["board"]):
+            is_flying_general_alert = True   # Hai tướng nhìn thẳng nhau (lộ tướng)
+        if is_king_in_check(game["state"]["board"], player_color):
+            is_self_check_alert = True       # Nước đi khiến tướng mình bị chiếu (sai luật)
+        
+        # Kiểm tra xem có chiếu tướng đối thủ không
+        opponent_color = get_opponent_color(player_color)
+        if is_king_in_check(game["state"]["board"], opponent_color):
+            is_check_alert = True            # Thông báo chiếu tướng
+
+        # Ghi lại nước đi vào lịch sử (database hoặc log)
+        idx = game.get("move_count", 0) + 1
+        add_move_record(game["game_id"], idx, fx, fy, move["to"]["x"], move["to"]["y"], piece)
+        game["move_count"] = idx
+
+        # Đổi lượt cho người chơi còn lại
+        game["turn"] = opponent_color
+
+        # Kiểm tra xem tướng của 2 bên còn tồn tại hay không
+        red_king = find_king(game["state"]["board"], 'red')[0] != -1
+        black_king = find_king(game["state"]["board"], 'black')[0] != -1
+
+        # Nếu 1 trong 2 tướng bị ăn → game kết thúc
+        if not red_king or not black_king:
+            winner_color = 'red' if red_king and not black_king else 'black'
+            reason_msg = "Tướng đã bị ăn"
+            await send_game_over(room_id, winner_color, reason_msg)
+            continue  # Dừng xử lý nước đi tiếp theo (vì ván đã kết thúc)
+
+        # Xác định người đối thủ (tên player còn lại trong phòng)
+        player_names = list(game["player_colors"].keys())
+        opponent_name = player_names[1] if player_names[0] == player else player_names[0]
+
+        # Nếu đối thủ là Bot và đến lượt Bot đi -> chuẩn bị cho Bot di chuyển
+        if opponent_name == "Bot" and game.get("game_id") and game["turn"] == game["player_colors"]["Bot"]:
+            bot_color_to_move = game["turn"]
+
+    # Sau khi thoát khỏi lock, gửi lại trạng thái bàn cờ mới cho tất cả người trong phòng
+    await send_state(room_id)
+
+    # Hiển thị cảnh báo đặc biệt cho người chơi hiện tại (chỉ gửi riêng)
+    if is_flying_general_alert:
+        await websocket.send_text(json.dumps({"type":"system", "text": "⚠️ CẢNH BÁO: Lộ tướng!"}, ensure_ascii=False))
+    if is_self_check_alert:
+        await websocket.send_text(json.dumps({"type":"system", "text": "⚠️ CẢNH BÁO: Tướng của bạn đang bị chiếu!"}, ensure_ascii=False))
+    
+    # Nếu người chơi vừa chiếu tướng đối thủ → thông báo công khai cho cả phòng
+    if is_check_alert:
+        await broadcast_to_room(room_id, {"type":"system", "text": "CHIẾU TƯỚNG!"})
+    
+    # Nếu đến lượt Bot → tạo task cho Bot tự động đi nước tiếp theo
+    if bot_color_to_move:
+        asyncio.create_task(run_bot_move(room_id, bot_color_to_move))
+
+    # Kết thúc xử lý nước đi, tiếp tục lắng nghe các tin nhắn khác
+    continue
