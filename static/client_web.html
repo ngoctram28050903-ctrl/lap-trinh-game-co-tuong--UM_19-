@@ -23,8 +23,7 @@
       transition: background-image 0.5s ease-in-out; /* Hiệu ứng chuyển nền */
       box-sizing: border-box; /* Thêm để padding không làm vỡ layout */
     }
-    
-    /* === ĐÃ SỬA LỖI Ở ĐÂY === */
+
     body.in-lobby {
       /* Chuyển về nền sảnh chờ/game */
       background-image: url('/static/Sanhcho.jpg');
@@ -731,8 +730,6 @@
         }
     }
 
-    
-    /* === HÀM ĐÃ SỬA LỖI === */
     function leaveGame() {
         // === Sửa lỗi: KHÔNG XÓA class 'in-lobby' khi về sảnh ===
         // document.body.classList.remove('in-lobby'); // <-- Dòng này đã bị comment/xóa
@@ -746,9 +743,6 @@
         selected = null;
         log("Đã quay về sảnh.");
     }
-    /* === KẾT THÚC SỬA LỖI === */
-
-
     /* Hàm log lịch sử */
     function log(t){
       const el=document.getElementById("log");

@@ -1,20 +1,4 @@
-from __future__ import annotatiogit config --global user.email "you@example.com"
-  git config --global user.name "Your Name"  # dùng khi các class tham chiếu lẫn nhau như Game, Player
-import asyncio                     # Dùng để xử lý các tác vụ bất đồng bộ
-import copy                        # Dùng để sao chép
-import json                        # gửi/nhận dữ liệu qua WebSocket giữa client và server
-import random                      # Sinh số ngẫu nhiên 
-import sqlite3                     #  SQLite (lưu thông tin người chơi, lịch sử trận đấu)
-import time                        # Dùng để đo thời gian hoặc tạo timestamp
-import traceback                   # In ra lỗi chi tiết (stack trace) khi có lỗi trong quá trình chạy server — giúp debug dễ hơn
-import uuid                        # Tạo chuỗi ID duy nhất 
-from dataclasses import dataclass, field  # Dùng để tạo class dữ liệu GameState, Player, Room
-from pathlib import Path            # Làm việc với đường dẫn file
-from typing import Dict, List, Optional, Tuple  # Hỗ trợ khai báo kiểu dữ liệu rõ ràng cho biến và hàm (để code dễ đọc, tránh lỗi)
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # FastAPI là framework chính; WebSocket dùng để giao tiếp thời gian thực giữa người chơi và server
-from fastapi.responses import FileResponse, JSONResponse     # Gửi file HTML hoặc JSON về client (trang chơi cờ hoặc dữ liệu API)
-from fastapi.staticfiles import StaticFiles                   # Dùng để phục vụ file tĩnh (CSS, ảnh, JS) cho giao diện web game
-# main.py
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -557,436 +541,419 @@ async def leaderboard():
         print(f"[DB] leaderboard error: {e}")
         return JSONResponse([])
 
-
-
-
-
-
-# xử lý người chơi khi kết nối WebSocket và vào sảnh
+# API xử lý kết nối WebSocket chính
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # 1. BẮT TAY KẾT NỐI
+    # Chấp nhận yêu cầu kết nối từ Client (trình duyệt)
     await websocket.accept()
-    player_name: Optional[str] = None
+    player_name = None # Biến lưu tên người chơi của phiên kết nối này
 
     try:
+        # Vòng lặp vô hạn: Server luôn lắng nghe tin nhắn từ Client gửi lên
         while True:
-            raw = await websocket.receive_text()
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                await safe_send(websocket, {"type": "error", "reason": "invalid_json"})
-                continue
-
-            mtype = msg.get("type")
-
-            # ---- LOBBY ----
-            if mtype == "join_lobby":
-                player_name = msg.get("player") or ("P" + str(int(time.time()) % 1000))
-                async with lock:
-                    if find_ws_by_name(player_name):
-                        player_name = player_name + str(int(time.time()) % 100)
-                    lobby[websocket] = player_name
-                print(f"[LOBBY] {player_name} joined.")
-                await safe_send(websocket, {"type": "system", "text": f"Chào mừng {player_name} đến sảnh."})
-                await send_lobby_update()
-                continue
-            # xử lý khi có người chơi gửi tin nhắn kiểu "challenge".
-            if msg_type == "challenge": #người chơi gửi yêu cầu thách đấu
-                    target_name = msg.get("target_player") # Lấy tên người chơi bị thách đấu từ dữ liệu tin nhắn
-                    if not player_name: continue
-            # Nếu tên người chơi đang gửi yêu cầu không tồn tại hoặc rỗng, thì bỏ qua vòng lặp này
-                    if target_name == player_name:
-            # Nếu người chơi đang gửi yêu cầu tự thách đấu mình
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "reason": "Bạn không thể tự thách đấu mình."
-                    }, ensure_ascii=False))
-            # Gửi lại thông báo lỗi qua websocket tự thách đấu bản thân
-                continue
-            # Bỏ qua phần xử lý tiếp theo, quay lại chờ tin nhắn mớid
+            # Chờ nhận dữ liệu dạng text (JSON string)
+            data = await websocket.receive_text()
             
-            # ----- CHALLENGE với bot -----
-if target_name == "Bot":                           # người chơi chọn thách đấu với "Bot"
-    async with lock:                               # tránh các clients khác sửa dữ liệu cùng lúc
-        if websocket in lobby: del lobby[websocket] # Xóa người chơi khỏi danh sách chờ (lobby)
-        room_id = str(uuid.uuid4())                # Tạo ID phòng ngẫu nhiên duy nhất
-        player_room_map[websocket] = room_id        # Ghi nhớ người chơi này đang ở phòng nào
-
-        human_player_name = player_name             # Lưu tên người chơi thật
-        bot_player_name = "Bot"                     # Đặt tên cho đối thủ là "Bot"
-
-        game_id = create_game_record(room_id, human_player_name, bot_player_name)
-        # Tạo bản ghi game mới trong database (hoặc log) để lưu lại thông tin trận đấu
-
-        rooms[room_id] = {                          # Khởi tạo thông tin phòng chơi
-            "players": {websocket: human_player_name},     # Liên kết socket người chơi với tên
-            "player_colors": {human_player_name: 'red', bot_player_name: 'black'}, # Người chơi thật cầm đỏ, bot cầm đen
-            "turn": "red",   # Lượt đầu tiên là của người chơi đỏ
-            "state": init_board(),      # Khởi tạo bàn cờ ban đầu
-            "game_id": game_id,    # Gắn ID trận vào
-            "move_count": 0,      # Đếm số lượt đi
-            "clocks": {"red": 300, "black": 300},    # Mỗi bên có 300 giây (5 phút)
-            "timer_task": None,       # Sẽ khởi tạo task đếm thời gian sau
-            "rematch_offered_by": None    # Chưa ai đề nghị chơi lại
-        }
-
-        rooms[room_id]["timer_task"] = asyncio.create_task(timer_loop(room_id))
-        # Bắt đầu chạy task đếm giờ song song cho phòng này
-
-        await websocket.send_text(json.dumps({
-            "type": "game_start",   # Gửi thông báo cho client biết trận đấu bắt đầu
-            "room_id": room_id,           # ID phòng
-            "color": "red",       # Màu quân của người chơi
-            "opponent": bot_player_name      # Đối thủ là Bot
-        }, ensure_ascii=False))
-
-        print(f"[MATCH START] room={room_id} {human_player_name}(red) vs {bot_player_name}(black)")
-        # In ra log server để theo dõi
-
-        await send_state(room_id)                   # Gửi trạng thái bàn cờ ban đầu đến client
-    await send_lobby_update()                       # Cập nhật lại danh sách lobby cho những người khác
-    continue                                        # Quay lại vòng lặp chờ sự kiện tiếp theo
-# 'async with lock' đảm bảo chỉ một người xử lý việc mời tại một thời điểm.
-    
-    async with lock:
-    # Tìm kiếm kết nối (websocket) của người được mời.
-    target_ws = find_player_in_lobby(target_name)
-    
-    # Nếu không tìm thấy người được mời:
-    if not target_ws:
-        # Báo lỗi cho người mời và dừng xử lý.
-        await websocket.send_text(json.dumps({"type":"error","reason":f"Không tìm thấy người chơi '{target_name}' trong sảnh."}, ensure_ascii=False))
-        continue
-
-    # Ghi lại trạng thái đang chờ: Ai mời ai?
-    pending_challenges[target_name] = player_name
-    pending_challenge_targets[player_name] = target_name
-    
-    try:
-        # Gửi thông báo mời đến cho người được mời (target_ws).
-        await target_ws.send_text(json.dumps({"type":"challenge_received", "from_player": player_name}, ensure_ascii=False))
-    except Exception as e:
-        # Nếu gửi bị lỗi (ví dụ: người được mời bị ngắt kết nối):
-        print(f"[CHALLENGE] Failed to send to {target_name}: {e}")
-        # Báo lỗi cho người mời.
-        await websocket.send_text(json.dumps({"type":"error","reason":"Không thể gửi lời mời, đối thủ không phản hồi."}, ensure_ascii=False))
-        
-        # Hủy trạng thái chờ vì gửi lỗi.
-        pending_challenges.pop(target_name, None)
-        pending_challenge_targets.pop(player_name, None)
-        continue # Dừng lại.
-
-    # Nếu gửi mời thành công:
-    print(f"[CHALLENGE] {player_name} -> {target_name}")
-    # Báo cho người mời (websocket) biết là đã gửi xong.
-    await websocket.send_text(json.dumps({"type":"system","text":f"Đã gửi lời mời đến {target_name}. Đang chờ đối thủ chấp nhận..."}))
-    continue # Hoàn tất.
-
-# Nếu tin nhắn nhận được là "chấp nhận lời mời".
-
-if msg_type == "challenge_accept":
-    # Lấy tên của người đã gửi lời mời (opponent).
-    opponent_name = msg.get("opponent_name")
-    # 'player_name' là tên của người chấp nhận (chính là websocket hiện tại).
-    if not player_name: continue # Kiểm tra an toàn, nếu người chấp nhận không có tên thì bỏ qua.
-
-    # Sử dụng 'lock' để đảm bảo việc tạo phòng game diễn ra an toàn,
-    # tránh trường hợp 2 người chấp nhận cùng lúc hoặc lỗi dữ liệu.
-    async with lock:
-        # Tìm kết nối (websocket) của người đã mời.
-        challenger_ws = find_ws_by_name(opponent_name)
-        
-        # [Phần dự phòng]: Nếu tìm không thấy VÀ trong danh sách chờ
-        # đúng là 'opponent_name' đã mời 'player_name'.
-        if not challenger_ws and pending_challenges.get(player_name) == opponent_name:
-            # Thử tìm lại người đó trong sảnh (lobby).
-            challenger_ws = find_player_in_lobby(opponent_name)
-
-        # Nếu tìm đủ mọi cách mà vẫn không thấy người mời (có thể họ đã thoát):
-        if not challenger_ws:
-            # Báo lỗi về cho người chấp nhận (websocket).
-            await websocket.send_text(json.dumps({"type":"error","reason":f"'{opponent_name}' không còn ở sảnh hoặc phiên đã lỗi."}, ensure_ascii=False))
-            continue # Dừng xử lý.
-
-        # --- Nếu tìm thấy người mời, bắt đầu tạo trận đấu ---
-
-        # Dọn dẹp trạng thái "chờ mời" giữa 2 người này.
-        # Xóa lời mời mà 'opponent_name' gửi cho 'player_name'.
-        pending_challenges.pop(player_name, None)
-        pending_challenge_targets.pop(opponent_name, None)
-        # Xóa luôn nếu 'player_name' cũng đang mời 'opponent_name' (tránh xung đột).
-        pending_challenges.pop(opponent_name, None)
-        pending_challenge_targets.pop(player_name, None)
-
-        # Xóa cả hai người chơi khỏi sảnh (lobby) vì họ sắp vào game.
-        if websocket in lobby: del lobby[websocket]
-        if challenger_ws in lobby: del lobby[challenger_ws]
-
-        # Tạo một ID phòng game duy nhất.
-        room_id = str(uuid.uuid4())
-        
-        # Lưu lại: 2 kết nối (websocket) này giờ thuộc về phòng 'room_id'.
-        player_room_map[websocket] = room_id
-        player_room_map[challenger_ws] = room_id
-
-        # Gán tên cho rõ ràng.
-        challenger_name = lobby.get(challenger_ws, opponent_name) # Tên người mời
-        acceptor_name = player_name # Tên người chấp nhận
-        
-        # Tạo bản ghi game trong CSDL (Database) và lấy ID.
-        game_id = create_game_record(room_id, challenger_name, acceptor_name)
-
-        # Tạo đối tượng (dictionary) lưu trữ toàn bộ trạng thái của phòng game.
-        rooms[room_id] = {
-            "players": {websocket: acceptor_name, challenger_ws: challenger_name}, # Lưu ai điều khiển kết nối nào.
-            "player_colors": {challenger_name: 'red', acceptor_name: 'black'}, # Người mời (challenger) luôn là đỏ (đi trước).
-            "turn": "red", # Lượt đi đầu tiên là đỏ.
-            "state": init_board(), # Trạng thái bàn cờ ban đầu.
-            "game_id": game_id, # ID từ CSDL.
-            "move_count": 0, # Số nước đã đi.
-            "clocks": {"red": 300, "black": 300}, # Thời gian (ví dụ: 300 giây).
-            "timer_task": None, # Biến để giữ "task" đếm giờ.
-            "rematch_offered_by": None # Dùng cho việc mời tái đấu sau này.
-        }
-        
-        # Tạo và khởi chạy một 'task' (luồng) riêng để đếm giờ cho phòng này.
-        rooms[room_id]["timer_task"] = asyncio.create_task(timer_loop(room_id))
-
-        # Gửi tin nhắn "game_start" cho người chấp nhận (websocket): họ là màu 'black'.
-        await websocket.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "black", "opponent": challenger_name}, ensure_ascii=False))
-        # Gửi tin nhắn "game_start" cho người mời (challenger_ws): họ là màu 'red'.
-        await challenger_ws.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "red", "opponent": acceptor_name}, ensure_ascii=False))
-        
-        # In log trên server.
-        print(f"[MATCH START] room={room_id} {challenger_name}(red) vs {acceptor_name}(black)")
-        
-        # Gửi trạng thái bàn cờ ban đầu cho cả 2 người.
-        await send_state(room_id)
-        
-    # [Nằm ngoài 'lock'] Cập nhật lại danh sách sảnh cho tất cả người chơi khác
-    # (vì 2 người vừa vào game, không còn ở sảnh nữa).
-    await send_lobby_update()
-    continue # Kết thúc xử lý tin nhắn này.
-# ---------- CHALLENGE DECLINE ----------
-# Xử lý khi người chơi từ chối lời mời thách đấu
-if msg_type == "challenge_decline":
-
-    # Lấy tên đối thủ (người đã gửi lời mời)
-    opponent_name = msg.get("opponent_name")
-
-    # Dùng khóa async để tránh xung đột dữ liệu khi nhiều người cùng thao tác
-    async with lock:
-        # Tìm kết nối WebSocket của người đã gửi lời mời (đối thủ)
-        challenger_ws = find_ws_by_name(opponent_name)
-
-        if challenger_ws:
+            # Cố gắng giải mã JSON
             try:
-                # Gửi thông báo hệ thống đến đối thủ: "người chơi hiện tại đã từ chối lời mời"
-                await challenger_ws.send_text(json.dumps({
-                    "type": "system",
-                    "text": f"{player_name} đã từ chối lời mời."
-                }, ensure_ascii=False))
-            except:
-                # Nếu có lỗi (ví dụ đối thủ đã thoát), thì bỏ qua
-                pass
+                msg = json.loads(data)
+            except Exception:
+                # Nếu dữ liệu rác, không phải JSON chuẩn -> Báo lỗi và bỏ qua
+                await websocket.send_text(json.dumps({"type":"error","reason":"invalid_json"}))
+                continue
 
-        # Xóa thông tin lời mời khỏi danh sách chờ
-        pending_challenges.pop(player_name, None)          # Người chơi hiện tại không còn bị mời
-        pending_challenge_targets.pop(opponent_name, None) # Đối thủ không còn chờ phản hồi
+            # Lấy loại hành động (ví dụ: "move", "join_lobby", "challenge"...)
+            msg_type = msg.get("type")
 
-    # Kết thúc xử lý sự kiện này, tiếp tục lắng nghe các tin nhắn khác
-    continue
-# ---------- CHAT ----------
-# Xử lý khi người chơi gửi tin nhắn chat
-if msg_type == "chat_message":
-
-    # Lấy nội dung tin nhắn người chơi gửi
-    text = msg.get("text")
-
-    # Nếu không có nội dung tin nhắn hoặc chưa xác định tên người chơi thì bỏ qua
-    if not text or not player_name:
-        continue
-
-    # Tìm phòng mà người chơi này đang tham gia
-    room_id = player_room_map.get(websocket)
-
-    # Nếu người chơi không ở trong phòng nào hoặc phòng không tồn tại -> bỏ qua
-    if not room_id or room_id not in rooms:
-        continue
-
-    # Tạo đối tượng tin nhắn chat (dạng JSON) để gửi cho các người chơi khác
-    chat_msg = {
-        "type": "new_chat_message",  # Kiểu thông điệp để client biết đây là tin nhắn mới
-        "from": player_name,         # Người gửi tin nhắn
-        "text": text                 # Nội dung tin nhắn
-    }
-
-    # Gửi tin nhắn đến tất cả người chơi trong cùng phòng (broadcast)
-    await broadcast_to_room(room_id, chat_msg)
-
-    # Sau khi xử lý xong, tiếp tục chờ tin nhắn khác
-    continue
-# ---------- MOVE ----------
-# Xử lý khi người chơi thực hiện một nước đi
-if msg_type == "move":
-
-    # Lấy thông tin nước đi từ dữ liệu client gửi lên (VD: from -> to)
-    move = msg.get("move")
-
-    # Xác định phòng mà người chơi này đang ở
-    room_id = player_room_map.get(websocket)
-
-    # Nếu người chơi không ở trong phòng hoặc phòng không tồn tại -> báo lỗi
-    if not room_id or room_id not in rooms:
-        await websocket.send_text(json.dumps({"type":"error","reason":"Bạn không ở trong phòng."}, ensure_ascii=False))
-        continue
-
-    # Các cờ cảnh báo đặc biệt trong cờ tướng
-    is_check_alert = False            # Chiếu tướng đối thủ
-    is_self_check_alert = False       # Tự chiếu (nước đi sai)
-    is_flying_general_alert = False   # Hai tướng đối mặt trực tiếp (lộ tướng)
-    bot_color_to_move = None          # Dành cho chế độ chơi với Bot
-
-    # Khóa để tránh xung đột khi nhiều người cùng gửi dữ liệu
-    async with lock:
-        # Lấy thông tin game trong phòng hiện tại
-        game = rooms[room_id]
-
-        # Lấy tên người chơi từ websocket
-        player = game["players"].get(websocket)
-        if not player:
-            continue  # Nếu không tìm thấy, bỏ qua
-
-        # Xác định màu của người chơi (đỏ / đen)
-        player_color = game["player_colors"].get(player, "spectator")
-
-        # Kiểm tra xem có phải lượt của người chơi không
-        if player_color != game["turn"]:
-            await websocket.send_text(json.dumps({"type":"error","reason":"Không phải lượt của bạn"}, ensure_ascii=False))
-            continue
-
-        # Nếu game đã kết thúc rồi (game_id không tồn tại) -> báo lỗi
-        if game.get("game_id") is None:
-            await websocket.send_text(json.dumps({"type":"error","reason":"Game đã kết thúc"}, ensure_ascii=False))
-            continue
-
-        # Kiểm tra nước đi hợp lệ hay không
-        valid, reason = is_valid_move(game["state"]["board"], move, player_color)
-        if not valid:
-            # Nếu sai quy tắc, gửi lỗi lý do
-            await websocket.send_text(json.dumps({"type":"error","reason":reason}, ensure_ascii=False))
-            continue
-
-        # Lưu tọa độ quân cờ di chuyển (from_x, from_y)
-        fx, fy = move["from"]["x"], move["from"]["y"]
-        piece = game["state"]["board"][fy][fx]  # Quân cờ được di chuyển
-
-        # Thực hiện cập nhật bàn cờ với nước đi đó
-        apply_move(game["state"], move)
-
-        # Kiểm tra các tình huống đặc biệt sau khi di chuyển:
-        if is_flying_general(game["state"]["board"]):
-            is_flying_general_alert = True   # Hai tướng nhìn thẳng nhau (lộ tướng)
-        if is_king_in_check(game["state"]["board"], player_color):
-            is_self_check_alert = True       # Nước đi khiến tướng mình bị chiếu (sai luật)
-        
-        # Kiểm tra xem có chiếu tướng đối thủ không
-        opponent_color = get_opponent_color(player_color)
-        if is_king_in_check(game["state"]["board"], opponent_color):
-            is_check_alert = True            # Thông báo chiếu tướng
-
-        # Ghi lại nước đi vào lịch sử (database hoặc log)
-        idx = game.get("move_count", 0) + 1
-        add_move_record(game["game_id"], idx, fx, fy, move["to"]["x"], move["to"]["y"], piece)
-        game["move_count"] = idx
-
-        # Đổi lượt cho người chơi còn lại
-        game["turn"] = opponent_color
-
-        # Kiểm tra xem tướng của 2 bên còn tồn tại hay không
-        red_king = find_king(game["state"]["board"], 'red')[0] != -1
-        black_king = find_king(game["state"]["board"], 'black')[0] != -1
-
-        # Nếu 1 trong 2 tướng bị ăn → game kết thúc
-        if not red_king or not black_king:
-            winner_color = 'red' if red_king and not black_king else 'black'
-            reason_msg = "Tướng đã bị ăn"
-            await send_game_over(room_id, winner_color, reason_msg)
-            continue  # Dừng xử lý nước đi tiếp theo (vì ván đã kết thúc)
-
-        # Xác định người đối thủ (tên player còn lại trong phòng)
-        player_names = list(game["player_colors"].keys())
-        opponent_name = player_names[1] if player_names[0] == player else player_names[0]
-
-        # Nếu đối thủ là Bot và đến lượt Bot đi -> chuẩn bị cho Bot di chuyển
-        if opponent_name == "Bot" and game.get("game_id") and game["turn"] == game["player_colors"]["Bot"]:
-            bot_color_to_move = game["turn"]
-
-    # Sau khi thoát khỏi lock, gửi lại trạng thái bàn cờ mới cho tất cả người trong phòng
-    await send_state(room_id)
-
-    # Hiển thị cảnh báo đặc biệt cho người chơi hiện tại (chỉ gửi riêng)
-    if is_flying_general_alert:
-        await websocket.send_text(json.dumps({"type":"system", "text": "⚠️ CẢNH BÁO: Lộ tướng!"}, ensure_ascii=False))
-    if is_self_check_alert:
-        await websocket.send_text(json.dumps({"type":"system", "text": "⚠️ CẢNH BÁO: Tướng của bạn đang bị chiếu!"}, ensure_ascii=False))
-    
-    # Nếu người chơi vừa chiếu tướng đối thủ → thông báo công khai cho cả phòng
-    if is_check_alert:
-        await broadcast_to_room(room_id, {"type":"system", "text": "CHIẾU TƯỚNG!"})
-    
-    # Nếu đến lượt Bot → tạo task cho Bot tự động đi nước tiếp theo
-    if bot_color_to_move:
-        asyncio.create_task(run_bot_move(room_id, bot_color_to_move))
-
-    # Kết thúc xử lý nước đi, tiếp tục lắng nghe các tin nhắn khác
-    continue
-# ---------- LEAVE_GAME ----------
-# Xử lý khi người chơi rời khỏi ván game (ấn nút "Thoát game" hoặc rời phòng)
-if msg_type == "leave_game":
-
-    # Lấy ID của phòng hiện tại mà người chơi đang tham gia
-    room_id = player_room_map.get(websocket)
-
-    # Nếu người chơi KHÔNG ở trong phòng nào hoặc phòng đã bị xóa:
-    if not room_id or room_id not in rooms:
-        async with lock:
-            # Kiểm tra nếu người chơi chưa có trong sảnh (lobby)
-            if websocket not in lobby and player_name:
-                # Thêm người chơi trở lại vào sảnh chờ (lobby)
-                lobby[websocket] = player_name
-                # Gửi cập nhật danh sách sảnh cho tất cả người chơi
+            # ==========================================
+            # 1. XỬ LÝ VÀO SẢNH (JOIN LOBBY)
+            # ==========================================
+            if msg_type == "join_lobby":
+                # Lấy tên người chơi gửi lên, hoặc tự sinh tên "P..." nếu rỗng
+                player_name = msg.get("player") or ("P"+str(int(time.time())%1000))
+                
+                # KHÓA (LOCK): Đảm bảo an toàn khi nhiều người cùng vào sảnh 1 lúc
+                async with lock:
+                    # Kiểm tra xem tên có bị trùng không
+                    existing_ws = find_ws_by_name(player_name)
+                    if existing_ws:
+                        # Nếu trùng, thêm đuôi số vào sau tên
+                        player_name = player_name + str(int(time.time())%100)
+                    # Lưu websocket vào danh sách lobby toàn cục
+                    lobby[websocket] = player_name
+                
+                print(f"[LOBBY] {player_name} joined lobby.")
+                # Gửi thông báo riêng cho người chơi: "Chào mừng..."
+                await websocket.send_text(json.dumps({"type":"system","text":f"Chào mừng {player_name} đến sảnh."}, ensure_ascii=False))
+                # Gửi danh sách tất cả người chơi trong sảnh cho MỌI NGƯỜI cập nhật giao diện
                 await send_lobby_update()
-        continue  # Bỏ qua các bước sau, quay lại vòng lặp chờ tin nhắn tiếp theo
+                continue
 
-    # Nếu người chơi đang ở trong phòng game:
-    # -> Gọi hàm dọn dẹp (rời phòng, cập nhật trạng thái, giải phóng tài nguyên, v.v.)
-    await cleanup_player(websocket)
+            # ==========================================
+            # 2. XỬ LÝ THÁCH ĐẤU (CHALLENGE)
+            # ==========================================
+            if msg_type == "challenge":
+                target_name = msg.get("target_player") # Tên người bị thách đấu
+                if not player_name: continue # Chưa có tên thì không được thách đấu
+                
+                # Không cho phép tự thách đấu chính mình
+                if target_name == player_name:
+                    await websocket.send_text(json.dumps({"type":"error","reason":"Bạn không thể tự thách đấu mình."}, ensure_ascii=False))
+                    continue
 
-    async with lock:
-        # Sau khi rời game, thêm người chơi quay lại sảnh
-        if player_name:
-            lobby[websocket] = player_name
+                # ----- TRƯỜNG HỢP 2.1: ĐÁNH VỚI BOT (MÁY) -----
+                if target_name == "Bot":
+                    async with lock:
+                        # Xóa người chơi khỏi sảnh (để không ai mời được nữa)
+                        if websocket in lobby: del lobby[websocket]
+                        
+                        # Tạo ID phòng mới (UUID ngẫu nhiên)
+                        room_id = str(uuid.uuid4())
+                        player_room_map[websocket] = room_id # Gán người chơi vào phòng này
+                        
+                        human_player_name = player_name
+                        bot_player_name = "Bot"
+                        # Tạo bản ghi game trong Database
+                        game_id = create_game_record(room_id, human_player_name, bot_player_name)
+                        
+                        # Khởi tạo dữ liệu phòng game
+                        rooms[room_id] = {
+                            "players": {websocket: human_player_name}, 
+                            "player_colors": {human_player_name: 'red', bot_player_name: 'black'}, # Người là Đỏ, Bot là Đen
+                            "turn": "red", # Đỏ đi trước
+                            "state": init_board(), # Bàn cờ ban đầu
+                            "game_id": game_id,
+                            "move_count": 0,
+                            "clocks": {"red": 300, "black": 300}, # 5 phút mỗi bên
+                            "timer_task": None,
+                            "rematch_offered_by": None
+                        }
+                        # Bắt đầu luồng đếm ngược thời gian
+                        rooms[room_id]["timer_task"] = asyncio.create_task(timer_loop(room_id))
+                        
+                        # Gửi tin nhắn "Bắt đầu game" cho client
+                        await websocket.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "red", "opponent": bot_player_name}, ensure_ascii=False))
+                        print(f"[MATCH START] room={room_id} {human_player_name}(red) vs {bot_player_name}(black)")
+                        
+                        # Gửi trạng thái bàn cờ để client vẽ hình
+                        await send_state(room_id)
+                    
+                    # Cập nhật lại sảnh (để người khác thấy người này biến mất khỏi sảnh)
+                    await send_lobby_update()
+                    continue
 
-    # Gửi tin nhắn xác nhận cho người chơi: đã quay về sảnh
-    await websocket.send_text(json.dumps({
-        "type": "system",
-        "text": "Đã quay về sảnh."
-    }, ensure_ascii=False))
+                # ----- TRƯỜNG HỢP 2.2: ĐÁNH VỚI NGƯỜI KHÁC -----
+                async with lock:
+                    target_ws = find_player_in_lobby(target_name) # Tìm websocket của đối thủ
+                    if not target_ws:
+                        await websocket.send_text(json.dumps({"type":"error","reason":f"Không tìm thấy người chơi '{target_name}' trong sảnh."}, ensure_ascii=False))
+                        continue
+                    
+                    # Lưu lại lời mời vào danh sách chờ
+                    pending_challenges[target_name] = player_name
+                    pending_challenge_targets[player_name] = target_name
+                    
+                    try:
+                        # Chuyển lời mời đến máy của đối thủ
+                        await target_ws.send_text(json.dumps({"type":"challenge_received", "from_player": player_name}, ensure_ascii=False))
+                    except Exception as e:
+                        # Xử lý nếu đối thủ rớt mạng
+                        print(f"[CHALLENGE] Failed to send to {target_name}: {e}")
+                        await websocket.send_text(json.dumps({"type":"error","reason":"Không thể gửi lời mời, đối thủ không phản hồi."}, ensure_ascii=False))
+                        pending_challenges.pop(target_name, None)
+                        pending_challenge_targets.pop(player_name, None)
+                        continue
+                
+                # Phản hồi cho người mời biết là đã gửi xong
+                print(f"[CHALLENGE] {player_name} -> {target_name}")
+                await websocket.send_text(json.dumps({"type":"system","text":f"Đã gửi lời mời đến {target_name}. Đang chờ đối thủ chấp nhận..."}))
+                continue
 
-    # Gửi cập nhật danh sách người chơi trong sảnh (để hiển thị cho tất cả client)
-    await send_lobby_update()
+            # ==========================================
+            # 3. CHẤP NHẬN LỜI MỜI (ACCEPT)
+            # ==========================================
+            if msg_type == "challenge_accept":
+                opponent_name = msg.get("opponent_name") # Tên người đã mời mình
+                if not player_name: continue
+                async with lock:
+                    challenger_ws = find_ws_by_name(opponent_name)
+                    # Kiểm tra kỹ xem người mời còn đó không
+                    if not challenger_ws and pending_challenges.get(player_name) == opponent_name:
+                         challenger_ws = find_player_in_lobby(opponent_name)
+                    
+                    if not challenger_ws:
+                        await websocket.send_text(json.dumps({"type":"error","reason":f"'{opponent_name}' không còn ở sảnh hoặc phiên đã lỗi."}, ensure_ascii=False))
+                        continue
+                    
+                    # Xóa các lời mời đang chờ
+                    pending_challenges.pop(player_name, None)
+                    pending_challenge_targets.pop(opponent_name, None)
+                    # ... dọn dẹp thêm các chiều khác ...
+                    pending_challenges.pop(opponent_name, None)
+                    pending_challenge_targets.pop(player_name, None)
 
-    # Tiếp tục vòng lặp (lắng nghe tin nhắn tiếp theo)
-    continue
-# ----------------- XỬ LÝ NGẮT KẾT NỐI -----------------
-except WebSocketDisconnect:
-    # Khi người chơi bị ngắt kết nối (đóng tab, mất mạng, thoát game,...)
-    print(f"[WS] Disconnect: {player_name}")   # In thông báo ra console để theo dõi
-    await cleanup_player(websocket)            # Gọi hàm dọn dẹp dữ liệu người chơi (xóa khỏi phòng, cập nhật sảnh,...)
-# ----------------- XỬ LÝ LỖI BẤT NGỜ -----------------
-except Exception as e:
-    # Nếu có lỗi khác xảy ra trong quá trình xử lý (ví dụ lỗi logic, dữ liệu sai,...)
-    print(f"[WS] Exception for {player_name}: {e}")  # In thông báo lỗi kèm tên người chơi
-    traceback.print_exc()                            # In chi tiết lỗi (stack trace) để tiện debug
-    await cleanup_player(websocket)                  # Dọn dẹp người chơi để tránh lỗi "người chơi ma" hoặc dữ liệu thừa
+                    # Xóa cả 2 người khỏi sảnh
+                    if websocket in lobby: del lobby[websocket]
+                    if challenger_ws in lobby: del lobby[challenger_ws]
+                    
+                    # Tạo phòng
+                    room_id = str(uuid.uuid4())
+                    player_room_map[websocket] = room_id
+                    player_room_map[challenger_ws] = room_id
+                    
+                    challenger_name = lobby.get(challenger_ws, opponent_name)
+                    acceptor_name = player_name # Người chấp nhận lời mời
+                    game_id = create_game_record(room_id, challenger_name, acceptor_name)
+                    
+                    # Người MỜI (Challenger) cầm ĐỎ, người NHẬN cầm ĐEN
+                    rooms[room_id] = {
+                        "players": {websocket: acceptor_name, challenger_ws: challenger_name},
+                        "player_colors": {challenger_name: 'red', acceptor_name: 'black'},
+                        "turn": "red", "state": init_board(), "game_id": game_id,
+                        "move_count": 0, "clocks": {"red": 300, "black": 300},
+                        "timer_task": None, "rematch_offered_by": None
+                    }
+                    rooms[room_id]["timer_task"] = asyncio.create_task(timer_loop(room_id))
+                    
+                    # Gửi tin nhắn bắt đầu game cho CẢ 2 NGƯỜI
+                    await websocket.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "black", "opponent": challenger_name}, ensure_ascii=False))
+                    await challenger_ws.send_text(json.dumps({"type": "game_start", "room_id": room_id, "color": "red", "opponent": acceptor_name}, ensure_ascii=False))
+                    
+                    print(f"[MATCH START] room={room_id} {challenger_name}(red) vs {acceptor_name}(black)")
+                    await send_state(room_id) # Gửi bàn cờ
+                
+                await send_lobby_update() # Cập nhật sảnh
+                continue
+
+            # ==========================================
+            # 3.1 TỪ CHỐI LỜI MỜI (DECLINE)
+            # ==========================================
+            if msg_type == "challenge_decline":
+                opponent_name = msg.get("opponent_name")
+                async with lock:
+                    challenger_ws = find_ws_by_name(opponent_name)
+                    if challenger_ws:
+                        try:
+                            # Báo cho người mời biết là bị từ chối
+                            await challenger_ws.send_text(json.dumps({"type":"system", "text": f"{player_name} đã từ chối lời mời."}, ensure_ascii=False))
+                        except: pass
+                    # Dọn dẹp danh sách chờ
+                    pending_challenges.pop(player_name, None)
+                    pending_challenge_targets.pop(opponent_name, None)
+                continue
+
+            # ==========================================
+            # 3.2 CHAT TRONG GAME
+            # ==========================================
+            if msg_type == "chat_message":
+                text = msg.get("text")
+                if not text or not player_name: continue
+                room_id = player_room_map.get(websocket)
+                if not room_id or room_id not in rooms: continue
+                
+                # Broadcast tin nhắn cho mọi người trong phòng
+                chat_msg = {"type": "new_chat_message", "from": player_name, "text": text}
+                await broadcast_to_room(room_id, chat_msg)
+                continue
+
+            # ==========================================
+            # 4. XỬ LÝ NƯỚC ĐI (MOVE) - QUAN TRỌNG NHẤT
+            # ==========================================
+            if msg_type == "move":
+                move = msg.get("move") # Thông tin nước đi: từ {x,y} đến {x,y}
+                room_id = player_room_map.get(websocket)
+                if not room_id or room_id not in rooms:
+                    await websocket.send_text(json.dumps({"type":"error","reason":"Bạn không ở trong phòng."}, ensure_ascii=False))
+                    continue
+
+                # Các cờ cảnh báo (Chiếu tướng, Lộ mặt tướng...)
+                is_check_alert = False
+                is_self_check_alert = False
+                is_flying_general_alert = False
+                bot_color_to_move = None # Cờ báo hiệu Bot cần đi sau nước này
+
+                async with lock:
+                    game = rooms[room_id]
+                    player = game["players"].get(websocket)
+                    if not player: continue
+
+                    # Kiểm tra lượt đi (Turn)
+                    player_color = game["player_colors"].get(player, "spectator")
+                    if player_color != game["turn"]:
+                        await websocket.send_text(json.dumps({"type":"error","reason":"Không phải lượt của bạn"}, ensure_ascii=False))
+                        continue
+                    
+                    if game.get("game_id") is None:
+                        await websocket.send_text(json.dumps({"type":"error","reason":"Game đã kết thúc"}, ensure_ascii=False))
+                        continue
+
+                    # Kiểm tra luật cờ (Hàm is_valid_move)
+                    valid, reason = is_valid_move(game["state"]["board"], move, player_color)
+                    if not valid:
+                        await websocket.send_text(json.dumps({"type":"error","reason":reason}, ensure_ascii=False))
+                        continue
+
+                    # --- THỰC HIỆN NƯỚC ĐI ---
+                    fx, fy = move["from"]["x"], move["from"]["y"]
+                    piece = game["state"]["board"][fy][fx]
+                    apply_move(game["state"], move) # Cập nhật dữ liệu bàn cờ
+
+                    # --- KIỂM TRA HẬU QUẢ CỦA NƯỚC ĐI ---
+                    if is_flying_general(game["state"]["board"]):
+                        is_flying_general_alert = True # 2 tướng nhìn mặt nhau
+                    if is_king_in_check(game["state"]["board"], player_color):
+                        is_self_check_alert = True # Tự làm mình bị chiếu
+                    
+                    opponent_color = get_opponent_color(player_color)
+                    if is_king_in_check(game["state"]["board"], opponent_color):
+                        is_check_alert = True # Chiếu tướng đối thủ
+
+                    # Lưu log nước đi vào DB
+                    idx = game.get("move_count", 0) + 1
+                    add_move_record(game["game_id"], idx, fx, fy, move["to"]["x"], move["to"]["y"], piece)
+                    game["move_count"] = idx
+                    
+                    # ĐỔI LƯỢT
+                    game["turn"] = opponent_color
+
+                    # --- KIỂM TRA THẮNG THUA (ĂN MẤT TƯỚNG) ---
+                    red_king = find_king(game["state"]["board"], 'red')[0] != -1
+                    black_king = find_king(game["state"]["board"], 'black')[0] != -1
+
+                    if not red_king or not black_king:
+                        # Nếu một trong 2 tướng biến mất -> Game Over
+                        winner_color = 'red' if red_king and not black_king else 'black'
+                        reason_msg = "Tướng đã bị ăn"
+                        await send_game_over(room_id, winner_color, reason_msg)
+                        continue
+
+                    # Kiểm tra nếu đối thủ là BOT thì chuẩn bị kích hoạt Bot
+                    player_names = list(game["player_colors"].keys())
+                    opponent_name = player_names[1] if player_names[0] == player else player_names[0]
+                    if opponent_name == "Bot" and game.get("game_id") and game["turn"] == game["player_colors"]["Bot"]:
+                        bot_color_to_move = game["turn"]
+                
+                # Gửi bàn cờ mới cho cả phòng
+                await send_state(room_id)
+                
+                # Gửi các cảnh báo hệ thống
+                if is_flying_general_alert:
+                    await websocket.send_text(json.dumps({"type":"system", "text": "⚠️ CẢNH BÁO: Lộ tướng!"}, ensure_ascii=False))
+                if is_self_check_alert:
+                     await websocket.send_text(json.dumps({"type":"system", "text": "⚠️ CẢNH BÁO: Tướng của bạn đang bị chiếu!"}, ensure_ascii=False))
+                if is_check_alert:
+                    await broadcast_to_room(room_id, {"type":"system", "text": "CHIẾU TƯỚNG!"})
+                
+                # Nếu đến lượt Bot -> Gọi hàm Bot suy nghĩ (asyncio.create_task để không chặn server)
+                if bot_color_to_move:
+                    asyncio.create_task(run_bot_move(room_id, bot_color_to_move))
+
+                continue
+
+            # ==========================================
+            # 5. XỬ LÝ CHƠI LẠI (REMATCH) - ĐÃ SỬA LỖI
+            # ==========================================
+            if msg_type == "offer_rematch":
+                room_id = player_room_map.get(websocket)
+                if not room_id or room_id not in rooms: continue
+
+                async with lock:
+                    game = rooms[room_id]
+                    # Chỉ cho phép rematch khi game đã kết thúc (game_id là None)
+                    if game.get("game_id") is not None:
+                        await websocket.send_text(json.dumps({"type":"error","reason":"Game chưa kết thúc"}))
+                        continue
+
+                    player = game["players"].get(websocket)
+                    player_names = list(game["player_colors"].keys())
+                    
+                    # === ĐÂY LÀ DÒNG FIX LỖI "UNDEFINED VARIABLE" ===
+                    # Kiểm tra xem trong phòng có "Bot" không
+                    is_bot_game = "Bot" in player_names
+                    # ================================================
+
+                    # 1. Logic nếu chơi với BOT
+                    if is_bot_game:
+                        print(f"[{room_id}] Chơi lại với Bot")
+                        p1, p2 = player_names
+                        # Tạo game mới ngay lập tức (Bot luôn đồng ý)
+                        game_id = create_game_record(room_id, p1, p2) 
+                        game["state"] = init_board() # Reset bàn cờ
+                        game["turn"] = "red" 
+                        game["move_count"] = 0
+                        game["game_id"] = game_id
+                        game["clocks"] = {"red": 300, "black": 300} # Reset đồng hồ
+                        game["rematch_offered_by"] = None
+                        
+                        # Reset task đếm giờ
+                        if game.get("timer_task"):
+                             try: game["timer_task"].cancel()
+                             except: pass
+                        game["timer_task"] = asyncio.create_task(timer_loop(room_id))
+                        
+                        await send_state(room_id)
+                        await broadcast_to_room(room_id, {"type":"system", "text": "Bot đã đồng ý. Trận đấu mới bắt đầu!"})
+                        continue
+
+                    # 2. Logic nếu chơi NGƯỜI vs NGƯỜI
+                    # Nếu đối thủ đã mời trước đó -> Cả 2 cùng đồng ý -> Bắt đầu
+                    if game["rematch_offered_by"] and game["rematch_offered_by"] != player:
+                        p1, p2 = list(game["player_colors"].keys())
+                        game_id = create_game_record(room_id, p1, p2)
+                        game["state"] = init_board()
+                        game["turn"] = "red"
+                        game["move_count"] = 0
+                        game["game_id"] = game_id
+                        game["clocks"] = {"red": 300, "black": 300}
+                        game["rematch_offered_by"] = None
+                        if game.get("timer_task"):
+                             try: game["timer_task"].cancel()
+                             except: pass
+                        game["timer_task"] = asyncio.create_task(timer_loop(room_id))
+                        await send_state(room_id)
+                        await broadcast_to_room(room_id, {"type":"system", "text": "Cả hai đã đồng ý. Trận đấu mới bắt đầu!"})
+                    else:
+                        # Nếu chưa ai mời -> Lưu lại trạng thái chờ người kia đồng ý
+                        game["rematch_offered_by"] = player
+                        opponent_ws = get_opponent_ws(room_id, websocket)
+                        if opponent_ws:
+                            try:
+                                await opponent_ws.send_text(json.dumps({"type":"rematch_offered", "from": player}, ensure_ascii=False))
+                            except: pass
+                        await websocket.send_text(json.dumps({"type":"system", "text": "Đã gửi lời mời chơi lại."}, ensure_ascii=False))
+                continue
+
+            # ==========================================
+            # 6. THOÁT GAME (LEAVE)
+            # ==========================================
+            if msg_type == "leave_game":
+                room_id = player_room_map.get(websocket)
+                # Nếu đang không trong game -> Quay về sảnh
+                if not room_id or room_id not in rooms:
+                    async with lock:
+                        if websocket not in lobby and player_name:
+                            lobby[websocket] = player_name
+                            await send_lobby_update()
+                    continue
+
+                # Nếu đang trong game -> Xử lý rời phòng (thua cuộc nếu đang chơi)
+                await cleanup_player(websocket)
+                async with lock:
+                    if player_name:
+                        lobby[websocket] = player_name
+                await websocket.send_text(json.dumps({"type":"system","text":"Đã quay về sảnh."}, ensure_ascii=False))
+                await send_lobby_update()
+                continue
+
+            # Loại tin nhắn lạ, không hiểu
+            await websocket.send_text(json.dumps({"type":"error","reason":"unknown_message_type"}))
+
+    # Xử lý khi người chơi tắt trình duyệt hoặc mất mạng
+    except WebSocketDisconnect:
+        print(f"[WS] Disconnect: {player_name}")
+        await cleanup_player(websocket)
+    except Exception as e:
+        print(f"[WS] Exception for {player_name}: {e}")
+        traceback.print_exc()
+        await cleanup_player(websocket)
